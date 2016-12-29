@@ -239,8 +239,6 @@ class Crawler
             throw new Exception("從 $url 找不到法條代碼");
         }
 
-        $version_fp = fopen(__DIR__ . "/laws/{$law_id}/version.csv", "w");
-
         foreach ($doc->getElementsByTagName('td') as $td_dom) {
             if ($td_dom->getAttribute('class') !== 'version_0') {
                 continue;
@@ -282,14 +280,48 @@ class Crawler
                     }
                 }
             }
-            fputcsv($version_fp, array(
-                implode(';', $versions),
-                implode(';', $types),
-            ));
+            self::addLawVersion($law_id, $title, $versions, $types);
         }
-        fclose($version_fp);
 
         self::addLaw($category, $category2, $status, $law_id, $title);
+    }
+
+    public static function addLawVersion($law_id, $title, $versions, $types)
+    {
+        $law_versions = array();
+
+        if (file_exists('laws-versions.csv')) {
+            $fp = fopen('laws-versions.csv', 'r');
+            $columns = fgetcsv($fp);
+
+            while ($rows = fgetcsv($fp)) {
+                $law_versions[$rows[0] . '-' . $rows[2]] = $rows;
+            }
+            fclose($fp);
+        }
+
+        $versions = implode(';', $versions);
+        $types = implode(';', $types);
+        $law_versions[$law_id . '-' . $versions] = array(
+            $law_id, $title, $versions, $types,
+        );
+
+        uksort($law_versions, function($k1, $k2) {
+            preg_match('#^(\d+)-中華民國(\d+)年(\d+)月(\d+)日#', $k1, $matches);
+            $k1 = sprintf("%05d%03d%02d%02d", $matches[1], $matches[2], $matches[3], $matches[4]);
+            preg_match('#^(\d+)-中華民國(\d+)年(\d+)月(\d+)日#', $k2, $matches);
+            $k2 = sprintf("%05d%03d%02d%02d", $matches[1], $matches[2], $matches[3], $matches[4]);
+            return strcmp($k1, $k2);
+        });
+
+        $fp = fopen('laws-versions.csv', 'w');
+        fputcsv($fp, array('代碼', '法條名稱', '發布時間', '包含資訊'));
+        foreach ($law_versions as $rows) {
+            fputcsv($fp, $rows);
+        }
+        fclose($fp);
+
+           
     }
 
     public static function addLaw($category, $category2, $status, $law_id, $title)
