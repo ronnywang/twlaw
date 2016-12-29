@@ -4,13 +4,29 @@ class Crawler
 {
     protected $curl;
 
-    protected function http($url)
+    protected function http($url, $post_params = null)
     {
-        curl_setopt($this->curl, CURLOPT_URL, $url);
-        $content = curl_exec($this->curl);
-        $info = curl_getinfo($this->curl);
-        if ($info['http_code'] != 200) {
-            throw new Exception("抓取 {$url} 失敗, code = {$info['http_code']}");
+        for ($i = 0; $i < 3; $i ++) {
+            curl_setopt($this->curl, CURLOPT_URL, $url);
+            if (!is_null($post_params)) {
+                $postfields = implode('&', array_map(function($k) use ($post_params) {
+                    return urlencode($k) . '=' . urlencode($post_params[$k]);
+                }, array_keys($post_params)));
+                curl_setopt($this->curl, CURLOPT_POSTFIELDS, $postfields);
+            } else {
+                curl_setopt($this->curl, CURLOPT_POSTFIELDS, null);
+            }
+            $content = curl_exec($this->curl);
+            $info = curl_getinfo($this->curl);
+            if ($info['http_code'] != 200) {
+                if ($i == 2) {
+                    throw new Exception("抓取 {$url} 失敗, code = {$info['http_code']}");
+                }
+                error_log("抓取 {$url} 失敗, code = {$info['http_code']}，等待 10 秒後重試");
+                sleep(10);
+                continue;
+            }
+            break;
         }
         return $content;
     }
@@ -51,21 +67,93 @@ class Crawler
                     if (strpos($href, '/lglawc/lglawkm') === false) {
                         continue;
                     }
-                    preg_match('#(.*)\(.*\)#', $a_dom->nodeValue, $matches);
+                    preg_match('#(.*)\((\d+)\)#', $a_dom->nodeValue, $matches);
                     $title = $matches[1];
-                    $categories[] = array($category, $title, $href);
+                    $count = $matches[2];
+                    $categories[] = array($category, $title, $href, $count);
                 }
             }
         }
         return $categories;
     }
 
+    public function getLawCategories()
+    {
+        if (!file_exists('laws-category.csv')) {
+            return array();
+        }
+
+        $law_categories = array();
+
+        $fp = fopen('laws-category.csv', 'r');
+        $columns = fgetcsv($fp);
+        while ($rows = fgetcsv($fp)) {
+            list($c1, $c2, $status, $law_id) = $rows;
+            $law_categories[implode(',', array($c1, $c2, $law_id))] = $rows;
+        }
+        fclose($fp);
+        return $law_categories;
+    }
+
+    /**
+     * getNextPageDoc 從現在這一頁的 $doc 找出下一頁的內容，如果沒有下一頁傳 null
+     * 
+     * @param mixed $doc 
+     * @access public
+     * @return void
+     */
+    public function getNextPageDoc($doc)
+    {
+        // 看看有沒有下一頁
+        if (!$form_dom = $doc->getElementsByTagName('form')->item(0)) {
+            return null;
+        }
+        $has_next_input = false;
+        $params = array();
+        foreach ($form_dom->getElementsByTagName('input') as $input_dom) {
+            if ($input_dom->getAttribute('type') == 'image' and $input_dom->getAttribute('src') == '/lglaw/images/page_next.png') {
+                $has_next_input = true;
+                $params[$input_dom->getAttribute('name') . '.x'] = 5;
+                $params[$input_dom->getAttribute('name') . '.y'] = 5;
+            } elseif ($input_dom->getAttribute('type') == 'hidden') {
+                $params[$input_dom->getAttribute('name')] = $input_dom->getAttribute('value');
+            }
+        }
+
+        if (!$has_next_input) {
+            return null;
+        }
+
+        $url = 'http://lis.ly.gov.tw' . $form_dom->getAttribute('action');
+
+        $content = $this->http($url, $params);
+        $doc = new DOMDocument;
+        @$doc->loadHTML($content);
+        return $doc;
+    }
+
     public function crawlLawList($categories)
     {
-        foreach ($categories as $rows) {
-            list($category, $category2, $url) = $rows;
+        // 先與現在的 laws.csv 比較一下數量
+        $category_count = array();
+        foreach (self::getLawCategories() as $law_category) {
+            list($category, $category2 ) = $law_category;
+            if (!array_key_exists($category . '-' . $category2, $category_count)) {
+                $category_count[$category . '-' . $category2] = 0;
+            }
+            $category_count[$category . '-' . $category2] ++;
+        }
+
+        $count = count($categories);
+        foreach ($categories as $no => $rows) {
+            list($category, $category2, $url, $count) = $rows;
+            if (array_key_exists($category . '-' . $category2, $category_count) and $category_count[$category . '-' . $category2] == $count) {
+                error_log("{$category} / {$category2} 數量吻合，不需要重抓");
+                continue;
+            }
+
             $laws = array();
-            error_log("抓取法案 {$category} > {$category2} 分類法案");
+            error_log("抓取法案 {$no}/{$count} {$category} > {$category2} 分類法案");
 
             $url = 'http://lis.ly.gov.tw' . $url;
             $content = $this->http($url);
@@ -73,74 +161,53 @@ class Crawler
             @$doc->loadHTML($content);
 
             // 先把廢止法連結拉出來備用
-            $deprecate_link = null;
+            $other_links = array();
             foreach ($doc->getElementsByTagName('a') as $a_dom) {
                 if (strpos($a_dom->nodeValue, '廢止法') === 0) {
-                    $deprecate_link = $a_dom->getAttribute('href');
-                    break;
+                    $other_links['廢止'] = $a_dom->getAttribute('href');
+                } elseif (strpos($a_dom->nodeValue, '停止適用法') === 0) {
+                    $other_links['停止適用'] = $a_dom->getAttribute('href');
                 }
             }
 
             // 先爬現行法
-            $page = 1;
             while (true) {
                 foreach ($doc->getElementsByTagName('a') as $a_dom) {
                     if (strpos($a_dom->getAttribute('href'), '/lglawc/lawsingle') === 0) {
-                        $this->crawlLaw($category, $category2, "現行", $a_dom->nodeValue, $a_dom->getAttribute('href'));
+                        for ($i = 0; $i < 3; $i ++) {
+                            try {
+                                $this->crawlLaw($category, $category2, "現行", $a_dom->nodeValue, $a_dom->getAttribute('href'));
+                                break;
+                            } catch (Exception $e) {
+                                error_log("crawlLaw {$a_dom->nodeValue} failed, retry");
+
+                            }
+                        }
                     }
                 }
 
-                // 看看有沒有下一頁
-                $has_next_page = false;
-                $page ++;
-                foreach ($doc->getElementsByTagName('a') as $a_dom) {
-                    if ($a_dom->getAttribute('class') == 'linkpage' and trim($a_dom->nodeValue, html_entity_decode('&nbsp;')) == $page) {
-                        $has_next_page = true;
-                        $url = 'http://lis.ly.gov.tw' . $a_dom->getAttribute('href');
-                        $content = $this->http($url);
-                        $doc = new DOMDocument;
-                        @$doc->loadHTML($content);
-                        break;
-                    }
-                }
-
-                if (!$has_next_page) {
+                if (!$doc = self::getNextPageDoc($doc)) {
                     break;
                 }
             }
 
-            // 再爬廢止法
-            if (is_null($deprecate_link)) {
-                continue;
-            }
-            $url = 'http://lis.ly.gov.tw' . $deprecate_link;
-            $content = $this->http($url);
-            $doc = new DOMDocument;
-            @$doc->loadHTML($content);
-            $page = 1;
-            while (true) {
-                foreach ($doc->getElementsByTagName('a') as $a_dom) {
-                    if (strpos($a_dom->getAttribute('href'), '/lglawc/lawsingle') === 0) {
-                        $this->crawlLaw($category, $category2, "廢止", $a_dom->nodeValue, $a_dom->getAttribute('href'));
+            // 再爬其他法
+            foreach ($other_links as $other_type => $other_link) {
+                $url = 'http://lis.ly.gov.tw' . $other_link;
+                error_log($url);
+                $content = $this->http($url);
+                $doc = new DOMDocument;
+                @$doc->loadHTML($content);
+                while (true) {
+                    foreach ($doc->getElementsByTagName('a') as $a_dom) {
+                        if (strpos($a_dom->getAttribute('href'), '/lglawc/lawsingle') === 0) {
+                            $this->crawlLaw($category, $category2, $other_type, $a_dom->nodeValue, $a_dom->getAttribute('href'));
+                        }
                     }
-                }
 
-                // 看看有沒有下一頁
-                $has_next_page = false;
-                $page ++;
-                foreach ($doc->getElementsByTagName('a') as $a_dom) {
-                    if ($a_dom->getAttribute('class') == 'linkpage' and trim($a_dom->nodeValue, html_entity_decode('&nbsp;')) == $page) {
-                        $has_next_page = true;
-                        $url = 'http://lis.ly.gov.tw' . $a_dom->getAttribute('href');
-                        $content = $this->http($url);
-                        $doc = new DOMDocument;
-                        @$doc->loadHTML($content);
+                    if (!$doc = self::getNextPageDoc($doc)) {
                         break;
                     }
-                }
-
-                if (!$has_next_page) {
-                    break;
                 }
             }
         }
@@ -148,22 +215,31 @@ class Crawler
 
     public function crawlLaw($category, $category2, $status, $title, $url)
     {
-        if (file_exists(__DIR__ . "/laws/{$title}")) {
-            return;
-        }
-
-        error_log("抓取條文 {$category} > {$category2} > {$title} 資料");
-        if (file_exists("tmp")) {
-            system("rm -rf tmp");
-        }
-        mkdir("tmp");
+        error_log("抓取條文 {$category} > {$category2} > {$title} ({$status}) 資料");
 
         $url = 'http://lis.ly.gov.tw' . $url;
         $content = $this->http($url);
         $doc = new DOMDocument;
         @$doc->loadHTML($content);
 
-        $version_fp = fopen("tmp/version.csv", "w");
+        // 先取出法條 ID
+        $law_id = null;
+        foreach ($doc->getElementsByTagName('td') as $td_dom) {
+            if ($td_dom->getAttribute('class') == 'law_NA' and preg_match('#\((\d+)\)$#', trim($td_dom->nodeValue), $matches)) {
+                $law_id = $matches[1];
+                break;
+            }
+        }
+        if (!file_exists(__DIR__ . "/laws/{$law_id}")) {
+            mkdir(__DIR__ . "/laws/{$law_id}");
+        }
+
+
+        if (is_null($law_id)) {
+            throw new Exception("從 $url 找不到法條代碼");
+        }
+
+        $version_fp = fopen(__DIR__ . "/laws/{$law_id}/version.csv", "w");
 
         foreach ($doc->getElementsByTagName('td') as $td_dom) {
             if ($td_dom->getAttribute('class') !== 'version_0') {
@@ -176,9 +252,13 @@ class Crawler
             }
 
             // 先抓全文 
-            $url = 'http://lis.ly.gov.tw' . $law_url;
-            $content = $this->http($url);
-            file_put_contents("tmp/{$versions[0]}.html", $content);
+            if (!file_exists(__DIR__ . "/laws/{$law_id}/{$versions[0]}.html")) {
+                $url = 'http://lis.ly.gov.tw' . $law_url;
+                $content = $this->http($url);
+                file_put_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}.html", $content);
+            } else {
+                $content = file_get_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}.html");
+            }
 
             // 再從全文中找出異動條文和理由及歷程
             $law_doc = new DOMDocument;
@@ -196,7 +276,7 @@ class Crawler
                     if ($img_dom->getAttribute('src') == "/lglaw/images/{$id}.png"){
                         $url = 'http://lis.ly.gov.tw' . $img_dom->parentNode->getAttribute('href');
                         $content = $this->http($url);
-                        file_put_contents("tmp/{$versions[0]}-{$name}.html", $content);
+                        file_put_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}-{$name}.html", $content);
 
                         $types[] = $name;
                     }
@@ -208,10 +288,45 @@ class Crawler
             ));
         }
         fclose($version_fp);
-        rename("tmp", __DIR__ . "/laws/{$title}");
-        file_put_contents(__DIR__ . "/laws.csv", implode(",", array(
-            $category, $category2, $status, $title,
-        )) . "\n", FILE_APPEND);
+
+        self::addLaw($category, $category2, $status, $law_id, $title);
+    }
+
+    public static function addLaw($category, $category2, $status, $law_id, $title)
+    {
+        $laws = array();
+        if (file_exists('laws.csv')) {
+            $fp = fopen('laws.csv', 'r');
+            fgetcsv($fp);
+            while ($rows = fgetcsv($fp)) {
+                $laws[$rows[0]] = $rows;
+            }
+            fclose($fp);
+        }
+
+        $laws[$law_id] = array($law_id, $title, $status);
+        ksort($laws);
+
+        $fp = fopen('laws.csv', 'w');
+        fputcsv($fp, array('代碼', '法條名稱', '狀態'));
+        foreach ($laws as $k => $v) {
+            fputcsv($fp, $v);
+        }
+        fclose($fp);
+
+        $law_categories = self::getLawCategories();
+        $rows = array($category, $category2, $title);
+        $law_categories[implode(',', array($category, $category2, $law_id))] = array(
+            $category, $category2, $status, $law_id, $title
+        );
+        ksort($law_categories);
+
+        $fp = fopen('laws-category.csv', 'w');
+        fputcsv($fp, array('主分類', '次分類', '狀態', '代碼', '法條名稱'));
+        foreach ($law_categories as $rows) {
+            fputcsv($fp, $rows);
+        }
+        fclose($fp);
     }
 
     public function main()
