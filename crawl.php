@@ -307,14 +307,25 @@ class Crawler
         );
 
         uksort($law_versions, function($k1, $k2) {
-            $k1 = array_shift(explode(';', $k1));
-            preg_match('#^(\d+)-中華民國(\d+)年(\d+)月(\d+)日#', $k1, $matches);
-            $k1 = sprintf("%05d%03d%02d%02d", $matches[1], $matches[2], $matches[3], $matches[4]);
+            list($id1, $k1) = explode('-', $k1);
+            list($id2, $k2) = explode('-', $k2);
+            $k1 = explode(';', $k1);
+            $k2 = explode(';', $k2);
 
-            $k2 = array_shift(explode(';', $k2));
-            preg_match('#^(\d+)-中華民國(\d+)年(\d+)月(\d+)日#', $k2, $matches);
-            $k2 = sprintf("%05d%03d%02d%02d", $matches[1], $matches[2], $matches[3], $matches[4]);
-            return strcmp($k1, $k2);
+            while (count($k1) and count($k2)) {
+                $v1 = array_pop($k1);
+                preg_match('#^中華民國(\d+)年(\d+)月(\d+)日#', $v1, $matches);
+                $v1 = sprintf("%05d%03d%02d%02d", $id1, $matches[1], $matches[2], $matches[3]);
+
+                $v2 = array_pop($k2);
+                preg_match('#^中華民國(\d+)年(\d+)月(\d+)日#', $v2, $matches);
+                $v2 = sprintf("%05d%03d%02d%02d", $id2, $matches[1], $matches[2], $matches[3]);
+
+                if ($r = strcmp($v1, $v2)) {
+                    return $r;
+                }
+            }
+            return 0;
         });
 
         $fp = fopen('laws-versions.csv', 'w');
