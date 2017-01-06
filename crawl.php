@@ -254,13 +254,9 @@ class Crawler
             }
 
             // 先抓全文 
-            if (!file_exists(__DIR__ . "/laws/{$law_id}/{$versions[0]}.html")) {
-                $url = 'http://lis.ly.gov.tw' . $law_url;
-                $content = $this->http($url);
-                file_put_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}.html", $content);
-            } else {
-                $content = file_get_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}.html");
-            }
+            $url = 'http://lis.ly.gov.tw' . $law_url;
+            $content = $this->http($url);
+            file_put_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}.html", $content);
 
             // 再從全文中找出異動條文和理由及歷程
             $law_doc = new DOMDocument;
