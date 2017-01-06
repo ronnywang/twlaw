@@ -334,8 +334,6 @@ class Crawler
             fputcsv($fp, $rows);
         }
         fclose($fp);
-
-           
     }
 
     public static function addLaw($category, $category2, $status, $law_id, $title)
@@ -373,6 +371,45 @@ class Crawler
             fputcsv($fp, $rows);
         }
         fclose($fp);
+   }
+
+    public function crawlLatestLaws()
+    {
+        $url = 'http://lis.ly.gov.tw/lglawc/lglawkm';
+        $content = $this->http($url);
+        $doc = new DOMDocument;
+        @$doc->loadHTML($content);
+
+        $law_categories = self::getLawCategories();
+
+        while (true) {
+            foreach ($doc->getElementsByTagName('a') as $a_dom) {
+                if (false === strpos($a_dom->getAttribute('href'), 'lglawc/lawsingle')) {
+                    continue;
+                }
+
+                $match_laws = array();
+                $url = $a_dom->getAttribute('href');
+                $title = trim($a_dom->nodeValue);
+                foreach ($law_categories as $law_category) {
+                    if ($law_category[4] == $title) {
+                        $match_laws[$law_category[3]] = $law_category;
+                    }
+                }
+
+                $match_laws = array_values($match_laws);
+                if (count($match_laws) != 1) {
+                    throw new Exception("吻合 {$title} 名稱的法律不是只有一條");
+                }
+
+                list($category, $category2, $type) = $match_laws[0];
+
+                $this->crawlLaw($category, $category2, $type, $title, $url);
+            }
+            if (!$doc = self::getNextPageDoc($doc)) {
+                break;
+            }
+        }
     }
 
     public function main()
@@ -385,8 +422,14 @@ class Crawler
         curl_setopt($this->curl, CURLOPT_COOKIEFILE, '');
         curl_setopt($this->curl, CURLOPT_RETURNTRANSFER, true);
 
+        // 先抓分類列表
         $categories = $this->crawlCategory();
+
+        // 去看有沒有分類的數量有變，表示可能有新增法條
         $this->crawlLawList($categories);
+
+        // 再回頭去最新公布法律抓新公布法
+        $this->crawlLatestLaws();
     }
 }
 
