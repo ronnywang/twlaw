@@ -106,6 +106,7 @@ class Exporter
                 return trim($td_dom->nodeValue);
             }
         }
+        return '';
         throw new Error("找不到 td.artipud_RS_2");
     }
 
@@ -275,90 +276,118 @@ class Exporter
 
     public function main()
     {
-        system("rm -rf outputs");
-        system("rm -rf outputs_json");
-        system("rm -rf law_cache");
+        if (!file_exists(__DIR__ . '/outputs')) {
+            mkdir(__DIR__ . '/outputs');
+            mkdir(__DIR__ . '/outputs_json');
+            mkdir(__DIR__ . '/law_cache');
+            system("git -C ./outputs init");
+            system("git -C ./outputs_json init");
+            system("git -C ./outputs remote add origin git@github.com:ronnywang/tw-law-corpus");
+            system("git -C ./outputs_json remote add origin git@github.com:ronnywang/tw-law-corpus");
+        }
 
-        mkdir(__DIR__ . '/outputs');
-        mkdir(__DIR__ . '/outputs_json');
-        mkdir(__DIR__ . '/law_cache');
-        system("git -C ./outputs init");
-        system("git -C ./outputs_json init");
-        system("git -C ./outputs remote add origin git@github.com:ronnywang/tw-law-corpus");
-        system("git -C ./outputs_json remote add origin git@github.com:ronnywang/tw-law-corpus");
-
+        $laws = array();
         $fp = fopen('laws.csv', 'r');
+        fgetcsv($fp);
+        while ($rows = fgetcsv($fp)) {
+            list($id, $name, $type) = $rows;
+            $laws[$id] = array(
+                'id' => $id,
+                'name' => $name,
+                'type' => $type,
+                'categories' => array(),
+            );
+        }
+        fclose($fp);
+
+        $fp = fopen('laws-category.csv', 'r');
+        fgetcsv($fp);
+        while ($rows = fgetcsv($fp)) {
+            list($category1, $category2, $type, $id, $name)= $rows;
+            $laws[$id]['categories'][] = array(
+                $category1, $category2
+            );
+        }
+        fclose($fp);
+
         error_log("parsing");
+        $fp = fopen('laws-versions.csv', 'r');
+        fgetcsv($fp);
         $commits = array();
         while ($rows = fgetcsv($fp)) {
-            list($category1, $category2, $type, $title) = $rows;
+            list($id, $title, $versions, $types) = $rows;
+
             if (count($_SERVER['argv']) > 1) {
                 if ($title != $_SERVER['argv'][1]) {
                     continue;
                 }
             }
 
-            $law_version_fp = fopen("laws/{$title}/version.csv", "r");
-            while ($rows = fgetcsv($law_version_fp)) {
-                list($versions, $types) = $rows;
-                $versions = explode(';', $versions);
-                if (strlen($types)) {
-                    $types = explode(';', $types);
-                } else {
-                    $types = array();
-                }
-
-                $content = file_get_contents("laws/{$title}/{$versions[0]}.html");
-                $obj = new StdClass;
-                $obj->title = $title;
-                $obj->versions = $versions;
-                $obj->types = $types;
-                try {
-                    $obj->law_data = $this->parseLawHTML($content);
-                } catch (Error $e) {
-                    $e->setMessage("{$title} {$versions[0]} {$e->getMessage()}");
-                    throw $e;
-                }
-
-                foreach ($types as $type) {
-                    try {
-                        if ($type == '異動條文') {
-                            // do nothing, 因為異動條文直接 diff 就可以得到了
-                        } elseif ($type == '立法歷程') {
-                            $content = file_get_contents("laws/{$title}/{$versions[0]}-立法歷程.html");
-                            $obj->law_history = $this->parseHistoryHTML($content);
-                        } elseif ($type == '異動條文及理由') {
-                            $content = file_get_contents("laws/{$title}/{$versions[0]}-異動條文及理由.html");
-                            $obj->law_reasons = $this->parseReasonHTML($content);
-                        } elseif ($type == '廢止理由') {
-                            $content = file_get_contents("laws/{$title}/{$versions[0]}-{$type}.html");
-                            $obj->deprecated_reason = $this->parseDeprecatedHTML($content);
-                        } else {
-                            throw new Exception("TODO {$type} 未處理");
-                        }
-                    } catch (Error $e) {
-                        $e->setMessage("{$title} {$versions[0]} {$type} {$e->getMessage()}");
-                        throw $e;
-                    } catch (Exception $e) {
-                        throw new Exception("{$title} {$versions[0]} {$type} {$e->getMessage()}");
-                    }
-                }
-                if (!preg_match('#中華民國(.*)年(.*)月(.*)日#', $obj->versions[count($obj->versions) - 1], $matches)) {
-                    throw new Error("找不到最後時間");
-                }
-                $commit_at = sprintf("%04d%02d%02d", $matches[1] + 1911, $matches[2], $matches[3]);
-                $id = count($commits);
-                file_put_contents("law_cache/{$id}", json_encode($obj));
-                $commits[] = array($commit_at, $id, $title, $versions, $category1, $category2);
+            $versions = explode(';', $versions);
+            if (strlen($types)) {
+                $types = explode(';', $types);
+            } else {
+                $types = array();
             }
+
+            // 先抓本文
+            $content = file_get_contents("laws/{$id}/{$versions[0]}.html");
+            $obj = new StdClass;
+            $obj->title = $title;
+            $obj->versions = $versions;
+            $obj->types = $types;
+            try {
+                $obj->law_data = $this->parseLawHTML($content);
+            } catch (Error $e) {
+                $e->setMessage("{$title} {$versions[0]} {$e->getMessage()}");
+                throw $e;
+            }
+
+            foreach ($types as $type) {
+                try {
+                    if ($type == '異動條文') {
+                        // do nothing, 因為異動條文直接 diff 就可以得到了
+                    } elseif ($type == '立法歷程') {
+                        $content = file_get_contents("laws/{$id}/{$versions[0]}-立法歷程.html");
+                        $obj->law_history = $this->parseHistoryHTML($content);
+                    } elseif ($type == '異動條文及理由') {
+                        $content = file_get_contents("laws/{$id}/{$versions[0]}-異動條文及理由.html");
+                        $obj->law_reasons = $this->parseReasonHTML($content);
+                    } elseif ($type == '廢止理由') {
+                        $content = file_get_contents("laws/{$id}/{$versions[0]}-{$type}.html");
+                        $obj->deprecated_reason = $this->parseDeprecatedHTML($content);
+                    } else {
+                        throw new Exception("TODO {$type} 未處理");
+                    }
+                } catch (Error $e) {
+                    $e->setMessage("{$title} {$versions[0]} {$type} {$e->getMessage()}");
+                    throw $e;
+                } catch (Exception $e) {
+                    throw new Exception("{$title} {$versions[0]} {$type} {$e->getMessage()}");
+                }
+            }
+            if (!preg_match('#中華民國(.*)年(.*)月(.*)日#', $obj->versions[count($obj->versions) - 1], $matches)) {
+                throw new Error("找不到最後時間");
+            }
+            $commit_at = sprintf("%04d%02d%02d", $matches[1] + 1911, $matches[2], $matches[3]);
+            file_put_contents("law_cache/{$id}.json", json_encode($obj));
+            $commits[] = array($commit_at, $id, $title, $versions);
         }
+        fclose($fp);
 
         usort($commits, function($a, $b) { return $a[0] - $b[0]; });
+
         error_log('writing');
+
+        if (!file_exists(__DIR__ . "/outputs/laws")) {
+            mkdir(__DIR__ . "/outputs/laws");
+            mkdir(__DIR__ . "/outputs_json/laws");
+        }
+
         foreach ($commits as $time_obj) {
-            list($commit_at, $id, $title, $versions, $category1, $category2) = $time_obj;
+            list($commit_at, $id, $title, $versions) = $time_obj;
             error_log($id);
-            if (!$obj = json_decode(file_get_contents("law_cache/{$id}"))) {
+            if (!$obj = json_decode(file_get_contents("law_cache/{$id}.json"))) {
                 continue;
             }
 
@@ -368,16 +397,21 @@ class Exporter
                 $e->setMessage("{$title} {$versions[0]} {$e->getMessage()}");
                 throw $e;
             }
-            if (!file_exists(__DIR__ . "/outputs/{$category1}/{$category2}")) {
-                mkdir(__DIR__ . "/outputs/{$category1}/{$category2}", 0777, true);
-                mkdir(__DIR__ . "/outputs_json/{$category1}/{$category2}", 0777, true);
+            foreach ($laws[$id]['categories'] as $categories) {
+                list($category1, $category2) = $categories;
+                if (!file_exists(__DIR__ . "/outputs/{$category1}/{$category2}")) {
+                    mkdir(__DIR__ . "/outputs/{$category1}/{$category2}", 0777, true);
+                    mkdir(__DIR__ . "/outputs_json/{$category1}/{$category2}", 0777, true);
+                }
+
+                file_put_contents(__DIR__ . "/outputs/{$category1}/{$category2}/{$title}.md", $info->content);
+                file_put_contents(__DIR__ . "/outputs_json/{$category1}/{$category2}/{$title}.json", json_encode($obj, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
             }
 
-            file_put_contents(__DIR__ . "/outputs/{$category1}/{$category2}/{$title}.md", $info->content);
             system("git -C ./outputs add .");
-            unset($info->content);
-            file_put_contents(__DIR__ . "/outputs_json/{$category1}/{$category2}/{$title}.json", json_encode($obj, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
             system("git -C ./outputs_json add .");
+
+            unset($info->content);
 
             $terms = array();
             if ($info->commit_at) {
