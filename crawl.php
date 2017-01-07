@@ -27,8 +27,8 @@ class Crawler
                 continue;
             }
 
-            if (strpos($content, 'can not load swap')) {
-                throw new Exception("抓取 {$url} 失敗, can not load swap");
+            if (strpos($content, 'can not load swap') or strpos($content, 'can not open for read')) {
+                throw new Exception("抓取 {$url} 失敗, error");
             }
             break;
         }
