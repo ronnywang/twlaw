@@ -398,8 +398,23 @@ class Crawler
                 }
 
                 $match_laws = array_values($match_laws);
-                if (count($match_laws) != 1) {
-                    throw new Exception("吻合 {$title} 名稱的法律不是只有一條");
+                if (count($match_laws) != 1) { // 如果有多筆符合，就進去找法條 ID
+                    $tmp_url = 'http://lis.ly.gov.tw' . $a_dom->getAttribute('href');
+                    $content = $this->http($tmp_url);
+                    $tmp_doc = new DOMDocument;
+                    @$tmp_doc->loadHTML($content);
+
+                    // 先取出法條 ID
+                    $law_id = null;
+                    foreach ($tmp_doc->getElementsByTagName('td') as $td_dom) {
+                        if ($td_dom->getAttribute('class') == 'law_NA' and preg_match('#\((\d+)\)$#', trim($td_dom->nodeValue), $matches)) {
+                            $law_id = $matches[1];
+                            break;
+                        }
+                    }
+                    $match_laws = array_values(array_filter($match_laws, function($r) use ($law_id) {
+                        return $r[3] == $law_id;
+                    }));
                 }
 
                 list($category, $category2, $type) = $match_laws[0];
