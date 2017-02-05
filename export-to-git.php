@@ -45,7 +45,7 @@ class Exporter
             $ret->content .= str_replace("\n", "  \n", $record->content) . "  \n";
 
             if (property_exists($obj, 'law_reasons') and array_key_exists($record->rule_no, $obj->law_reasons)) {
-                $ret->content .= "> 理由：" . $obj->law_reasons->{$record->rule_no};
+                $ret->content .= "> 理由：" . str_replace("\n", "\n\n> ", trim($obj->law_reasons->{$record->rule_no}));
                 unset($obj->law_reasons->{$record->rule_no});
             }
 
