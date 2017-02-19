@@ -3,3 +3,5 @@ law_cache
 outputs
 outputs_json
 laws
+gravatar/config.php
+gravatar/ly-data.csv
