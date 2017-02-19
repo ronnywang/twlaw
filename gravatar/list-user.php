@@ -7,9 +7,17 @@ fgetcsv($fp);
 $users = array();
 while ($rows = fgetcsv($fp)) {
     list($id, $name, $type) = $rows;
-    $obj = json_decode(file_get_contents(__DIR__ . "/../law_cache/{$id}.json"));
-    if ($obj and property_exists($obj, 'law_history') and property_exists($obj->law_history[0], '主提案')) {
-        $users[$obj->law_history[0]->{'主提案'}] = true;
+    if (!$obj = json_decode(file_get_contents(__DIR__ . "/../law_cache/{$id}.json"))) {
+        error_log($id);
+        continue;
+    }
+    if (!property_exists($obj, 'law_history')) {
+        continue;
+    }
+    foreach ($obj->law_history as $history) {
+        if (property_exists($history, '主提案')) {
+            $users[$history->{'主提案'}] = true;
+        }
     }
 }
 fclose($fp);
