@@ -188,54 +188,59 @@ class Exporter
                     if ($div_dom->getAttribute('id') == 'all') {
                         continue;
                     }
-                    $td_doms = $div_dom->getElementsByTagName('td');
-                    if ($td_doms->item(0)->getAttribute('class') != 'sumtd1') {
-                        continue;
-                    }
-                    $record = new StdClass;
-                    $record->{'進度'} = $td_doms->item(0)->nodeValue;
-                    $record->{'會議日期'} = $td_doms->item(1)->nodeValue;
-                    if (!$td_doms->item(2)) {
-                        throw new Error("找不到立法紀錄的表格");
-                    }
-                    $record->{'立法紀錄'} = $td_doms->item(2)->nodeValue;
-                    if ($td_doms->item(2)->getElementsByTagName('a')->item(0)) {
-                        $record->{'立法紀錄連結'} = $td_doms->item(2)->getElementsByTagName('a')->item(0)->getAttribute('href');
-                    }
-                    if ($p = $this->trim($td_doms->item(3)->nodeValue)) {
-                        $record->{'主提案'} = $p;
-                    }
-                    $record->{'關係文書'} = array();
-                    if (!$td_doms->item(4)) {
-                        $a_doms = array();
-                    } else {
-                        $a_doms = $td_doms->item(4)->getElementsByTagName('a');
-                    }
-                    foreach ($a_doms as $a_dom) {
-                        $href = $a_dom->getAttribute('href');
-                        if (strpos($href, '/') === 0) {
-                            $href = 'http://lis.ly.gov.tw' . $href;
-                        }
-                        if (!$text_dom = $a_dom->nextSibling or $text_dom->nodeType != XML_TEXT_NODE) {
-                            $record->{'關係文書'}[] = array(
-                                'null',
-                                $href,
-                            );
+                    foreach ($div_dom->getElementsByTagName('tr') as $tr_dom) {
+                        $td_doms = $tr_dom->getElementsByTagName('td');
+                        if (!$td_doms->item(0)) {
                             continue;
                         }
-                        $text = trim($text_dom->nodeValue, html_entity_decode('&nbsp;') . "\n\r");
-                        $text = preg_replace('#\s#', '', $text);
-                        if (!preg_match('#^\((.*)\),?$#', $text, $matches)) {
-                            $text = '';
-                        } else {
-                            $text = $matches[1];
+                        if ($td_doms->item(0)->getAttribute('class') != 'sumtd1') {
+                            continue;
                         }
-                        $record->{'關係文書'}[] = array(
-                            $text,
-                            $href,
-                        );
+                        $record = new StdClass;
+                        $record->{'進度'} = $td_doms->item(0)->nodeValue;
+                        $record->{'會議日期'} = $td_doms->item(1)->nodeValue;
+                        if (!$td_doms->item(2)) {
+                            throw new Error("找不到立法紀錄的表格");
+                        }
+                        $record->{'立法紀錄'} = $td_doms->item(2)->nodeValue;
+                        if ($td_doms->item(2)->getElementsByTagName('a')->item(0)) {
+                            $record->{'立法紀錄連結'} = $td_doms->item(2)->getElementsByTagName('a')->item(0)->getAttribute('href');
+                        }
+                        if ($p = $this->trim($td_doms->item(3)->nodeValue)) {
+                            $record->{'主提案'} = $p;
+                        }
+                        $record->{'關係文書'} = array();
+                        if (!$td_doms->item(4)) {
+                            $a_doms = array();
+                        } else {
+                            $a_doms = $td_doms->item(4)->getElementsByTagName('a');
+                        }
+                        foreach ($a_doms as $a_dom) {
+                            $href = $a_dom->getAttribute('href');
+                            if (strpos($href, '/') === 0) {
+                                $href = 'http://lis.ly.gov.tw' . $href;
+                            }
+                            if (!$text_dom = $a_dom->nextSibling or $text_dom->nodeType != XML_TEXT_NODE) {
+                                $record->{'關係文書'}[] = array(
+                                    'null',
+                                    $href,
+                                );
+                                continue;
+                            }
+                            $text = trim($text_dom->nodeValue, html_entity_decode('&nbsp;') . "\n\r");
+                            $text = preg_replace('#\s#', '', $text);
+                            if (!preg_match('#^\((.*)\),?$#', $text, $matches)) {
+                                $text = '';
+                            } else {
+                                $text = $matches[1];
+                            }
+                            $record->{'關係文書'}[] = array(
+                                $text,
+                                $href,
+                            );
+                        }
+                        $records[] = $record;
                     }
-                    $records[] = $record;
                 }
             }
 
