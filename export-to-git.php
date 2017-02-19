@@ -298,6 +298,15 @@ class Exporter
                 'categories' => array(),
             );
         }
+
+        fclose($fp);
+
+        $has_images = array();
+        $fp = fopen('gravatar/save-images.csv', 'r');
+        fgetcsv($fp);
+        while ($rows = fgetcsv($fp)) {
+            $has_images[$rows[0]] = true;
+        }
         fclose($fp);
 
         $fp = fopen('laws-category.csv', 'r');
@@ -419,7 +428,11 @@ class Exporter
                 unset($info->commit_at);
             }
             if (property_exists($info, 'commit_author') and $info->commit_author) {
-                $terms[] = "--author=" . escapeshellarg("{$info->commit_author} <{$info->commit_author}@ly-fake.gov.tw>");
+                if (array_key_exists($info->commit_author, $has_images)) {
+                    $terms[] = "--author=" . escapeshellarg("{$info->commit_author} <" . substr(md5($info->commit_author), 0, 16) . "@ly.govapi.tw>");
+                } else {
+                    $terms[] = "--author=" . escapeshellarg("{$info->commit_author} <{$info->commit_author}@ly.govapi.tw>");
+                }
                 unset($info->commit_author);
             }
             $terms[] = "-m " . escapeshellarg($info->commit_log);
