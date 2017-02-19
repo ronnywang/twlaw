@@ -72,8 +72,11 @@ class Exporter
         unset($obj->versions);
 
         if (property_exists($obj, 'law_history')) {
-            if (property_exists($obj->law_history[0], '主提案')) {
-                $ret->commit_author = $obj->law_history[0]->{'主提案'};
+            $ret->commit_authors = array();
+            foreach ($obj->law_history as $history) {
+                if (property_exists($history, '主提案')) {
+                    $ret->commit_authors[] = $history->{'主提案'};
+                }
             }
             $ret->commit_log .= "\n\n" . json_encode($obj->law_history, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
             unset($obj->law_history);
@@ -432,14 +435,27 @@ class Exporter
                 $terms[] = "--date=" . escapeshellarg(date('c', strtotime($info->commit_at)));
                 unset($info->commit_at);
             }
-            if (property_exists($info, 'commit_author') and $info->commit_author) {
-                if (array_key_exists($info->commit_author, $has_images)) {
-                    $terms[] = "--author=" . escapeshellarg("{$info->commit_author} <" . substr(md5($info->commit_author), 0, 16) . "@ly.govapi.tw>");
+
+            if (property_exists($info, 'commit_authors') and $info->commit_authors) {
+                $commit_author = array_shift($info->commit_authors);
+                if (array_key_exists($commit_author, $has_images)) {
+                    $mail = substr(md5($commit_author), 0, 16) . "@ly.govapi.tw";
                 } else {
-                    $terms[] = "--author=" . escapeshellarg("{$info->commit_author} <{$info->commit_author}@ly.govapi.tw>");
+                    $mail = $commit_author . "@ly.govapi.tw";
                 }
-                unset($info->commit_author);
+                $terms[] = "--author=" . escapeshellarg("{$commit_author} <{$mail}>");
+
+                foreach ($info->commit_authors as $commit_author) {
+                    if (array_key_exists($commit_author, $has_images)) {
+                        $mail = substr(md5($commit_author), 0, 16) . "@ly.govapi.tw";
+                    } else {
+                        $mail = $commit_author . "@ly.govapi.tw";
+                    }
+                    $info->commit_log .= "\nCo-Authored-By: {$commit_author} <{$mail}>";
+                }
             }
+            unset($info->commit_authors);
+
             $terms[] = "-m " . escapeshellarg($info->commit_log);
             unset($info->commit_log);
 
