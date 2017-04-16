@@ -113,6 +113,59 @@ class Exporter
         throw new Error("找不到 td.artipud_RS_2");
     }
 
+    public function parseRelateHTML($content)
+    {
+        $doc = new DOMDocument;
+        @$doc->loadHTML($content);
+
+        $ret = array();
+        $table_dom = $doc->getElementsByTagName('font')->item(0)->parentNode->nextSibling;
+        while ($table_dom = $table_dom->nextSibling) {
+            $group = null;
+            $law = null;
+            foreach ($table_dom->getElementsByTagName('font') as $font_dom) {
+                if ($font_dom->getAttribute('color') == 'blue') {
+                    $text = trim($font_dom->nodeValue);
+                    $text = trim($text, ':');
+                    if (in_array($text, array('引用條文', '被引用條文'))) {
+                        $group = $text;
+                        $law = null;
+                        if (array_key_exists($group, $ret)) {
+                            throw new Exception("$group 出現兩次");
+                        }
+                        $ret[$group] = array();
+                    } elseif (preg_match('#^(.*)\((.*)\)$#', $text, $matches)) {
+                        if (is_null($group)) {
+                            print_r($ret);
+                            echo $doc->saveHTML($table_dom);
+                            throw new Exception("錯誤");
+                        }
+                        $law_name = $matches[1];
+                        $law = $matches[2];
+                        $ret[$group][$law] = array(
+                            'law_no' => $law,
+                            'law_name' => $law_name,
+                            'numbers' => array(),
+                        );
+                    } else {
+                        echo $doc->saveHTML($font_dom);
+                        throw new Exception("不明格式");
+                    }
+                } elseif ($font_dom->getAttribute('color') == 'c000ff') {
+                    if (is_null($group) or is_null($law)) {
+                        echo $doc->saveHTML($font_dom);
+                        throw new Exception("不明格式");
+                    }
+                    $ret[$group][$law]['numbers'][] = trim($font_dom->nodeValue);
+                } else {
+                    echo $doc->saveHTML($font_dom);
+                    throw new Exception("不明格式");
+                }
+            }
+        }
+        return array_map('array_values', $ret);
+    }
+
     public function parseLawHTML($content)
     {
         $doc = new DOMDocument;
@@ -143,6 +196,18 @@ class Exporter
                 if ($pos >= $td_dom->childNodes->length or $td_dom->childNodes->item($pos)->nodeName == '#text') {
                     $line->rule_no = trim($name);
                     $line->content = $this->trim($td_dom->nodeValue);
+                    $line->relates = null;
+                    foreach ($td_dom->getElementsByTagName('img') as $img_dom) {
+                        if ($img_dom->getAttribute('src') != "/lglaw/images/relate.png") {
+                            continue;
+                        }
+                        $relate_id = explode('?', $img_dom->parentNode->getAttribute('href'))[1];
+                        if (!is_null($line->relates)) {
+                            print_r($line);
+                            exit;
+                        }
+                        $line->relates = self::parseRelateHTML(file_get_contents(__DIR__ . '/laws/relate/' . $relate_id . '.html'));
+                    }
                     $lines[] = $line;
                     break;
                 }
