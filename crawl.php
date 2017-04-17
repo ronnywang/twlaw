@@ -257,6 +257,7 @@ class Crawler
             $url = 'http://lis.ly.gov.tw' . $law_url;
             $content = $this->http($url);
             file_put_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}.html", $content);
+            $this->fetchRelate($content);
 
             // 再從全文中找出異動條文和理由及歷程
             $law_doc = new DOMDocument;
@@ -275,6 +276,7 @@ class Crawler
                         $url = 'http://lis.ly.gov.tw' . $img_dom->parentNode->getAttribute('href');
                         $content = $this->http($url);
                         file_put_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}-{$name}.html", $content);
+                        $this->fetchRelate($content);
 
                         $types[] = $name;
                     }
@@ -427,10 +429,33 @@ class Crawler
         }
     }
 
+    public function fetchRelate($content)
+    {
+        $doc = new DOMDocument;
+        @$doc->loadHTML($content);
+        file_put_contents('tmp', $content);
+        foreach ($doc->getElementsByTagName('img') as $img_dom) {
+            if ($img_dom->getAttribute('src') == '/lglaw/images/relate.png') {
+                $href = $img_dom->parentNode->getAttribute('href');
+                if (!preg_match('#/lglawc/lawsingle\?(.*)#', $href, $matches)) {
+                    throw new Exception("relate 的網址不是 lawsingle");
+                }
+                $id = $matches[1];
+                $url = 'http://lis.ly.gov.tw' . $href;
+                if (file_exists(__DIR__ . "/laws/relate/{$id}.html")) {
+                    continue;
+                }
+                $content = $this->http($url);
+                file_put_contents(__DIR__ . "/laws/relate/{$id}.html", $content);
+            }
+        }
+    }
+
     public function main()
     {
         if (!file_exists(__DIR__ . '/laws')) {
             mkdir(__DIR__ . '/laws');
+            mkdir(__DIR__ . '/laws/relate');
         }
 
         $this->curl = curl_init();
