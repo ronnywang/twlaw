@@ -17,7 +17,7 @@ class Exporter
         return trim($str, " \t\n" . html_entity_decode('&nbsp;'));
     }
 
-    public function genContent($origin_obj)
+    public function genContent($origin_obj, $laws)
     {
         $obj = clone $origin_obj;
         unset($obj->types); // types 用不到，跳過
@@ -45,8 +45,35 @@ class Exporter
             $ret->content .= str_replace("\n", "  \n", $record->content) . "  \n";
 
             if (property_exists($obj, 'law_reasons') and array_key_exists($record->rule_no, $obj->law_reasons)) {
-                $ret->content .= "> 理由：" . str_replace("\n", "\n\n> ", trim($obj->law_reasons->{$record->rule_no}));
+                $ret->content .= "> 理由：" . str_replace("\n", "\n\n> ", trim($obj->law_reasons->{$record->rule_no})) . "\n\n";
                 unset($obj->law_reasons->{$record->rule_no});
+            }
+
+            if (property_exists($record, 'relates') and is_object($record->relates)) {
+                foreach (array('引用條文', '被引用條文') as $type) {
+                    if (property_exists($record->relates, $type)) {
+                        foreach ($record->relates->{$type} as $relate_law) {
+                            if (!array_key_exists($relate_law->law_no, $laws)) {
+                                throw new Exception("找不到 {$relate_law->law_no}");
+                            }
+                            $relate_url = sprintf("../../%s/%s/%s.md",
+                                $laws[$relate_law->law_no]['categories'][0][0],
+                                $laws[$relate_law->law_no]['categories'][0][1],
+                                $laws[$relate_law->law_no]['name']
+                            );
+                            $relate_records = array();
+                            foreach ($relate_law->numbers as $number) {
+                                if (array_key_exists($number, $laws[$relate_law->law_no]['rule_note'])) {
+                                    $anchor = $laws[$relate_law->law_no]['rule_note'][$number];
+                                } else {
+                                    $anchor = $number;
+                                }
+                                $relate_records[] = "[{$number}]({$relate_url}#{$anchor})";
+                            }
+                            $ret->content .= "> {$type}: {$relate_law->law_name} " . implode(' ', $relate_records) . "\n\n";
+                        }
+                    }
+                }
             }
 
             $ret->content .= "\n";
@@ -196,13 +223,13 @@ class Exporter
                 if ($pos >= $td_dom->childNodes->length or $td_dom->childNodes->item($pos)->nodeName == '#text') {
                     $line->rule_no = trim($name);
                     $line->content = $this->trim($td_dom->nodeValue);
-                    $line->relates = null;
+                    $line->relates = new StdClass;
                     foreach ($td_dom->getElementsByTagName('img') as $img_dom) {
                         if ($img_dom->getAttribute('src') != "/lglaw/images/relate.png") {
                             continue;
                         }
                         $relate_id = explode('?', $img_dom->parentNode->getAttribute('href'))[1];
-                        if (!is_null($line->relates)) {
+                        if (json_encode($line->relates) != '{}') {
                             print_r($line);
                             exit;
                         }
@@ -369,6 +396,7 @@ class Exporter
                 'name' => $name,
                 'type' => $type,
                 'categories' => array(),
+                'rule_note' => array(),
             );
         }
 
@@ -396,6 +424,7 @@ class Exporter
         $fp = fopen('laws-versions.csv', 'r');
         fgetcsv($fp);
         $commits = array();
+
         while ($rows = fgetcsv($fp)) {
             list($id, $title, $versions, $types) = $rows;
 
@@ -423,6 +452,16 @@ class Exporter
             } catch (Error $e) {
                 $e->setMessage("{$title} {$versions[0]} {$e->getMessage()}");
                 throw $e;
+            }
+
+            foreach ($obj->law_data as $record) {
+                if (property_exists($record, 'rule_no')) {
+                    if (property_exists($record, 'note')) {
+                        $laws[$id]['rule_note'][$record->rule_no] = $record->rule_no . '-' . preg_replace('#[\()]#', '', $record->note);
+                    } else  {
+                        $laws[$id]['rule_note'][$record->rule_no] = $record->rule_no;
+                    }
+                }
             }
 
             foreach ($types as $type) {
@@ -474,7 +513,7 @@ class Exporter
             }
 
             try {
-                $info = self::genContent($obj);
+                $info = self::genContent($obj, $laws);
             } catch (Error $e) {
                 $e->setMessage("{$title} {$versions[0]} {$e->getMessage()}");
                 throw $e;
