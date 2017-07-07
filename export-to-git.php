@@ -46,7 +46,7 @@ class Exporter
 
             if (property_exists($obj, 'law_reasons') and array_key_exists($record->rule_no, $obj->law_reasons)) {
                 $ret->content .= "> 理由：" . str_replace("\n", "\n\n> ", trim($obj->law_reasons->{$record->rule_no})) . "\n\n";
-                unset($obj->law_reasons->{$record->rule_no});
+                //unset($obj->law_reasons->{$record->rule_no});
             }
 
             if (property_exists($record, 'relates') and is_object($record->relates)) {
