@@ -41,7 +41,7 @@ class Crawler
 
         $categories = array();
 
-        $content = $this->http('http://lis.ly.gov.tw/lglawc/lglawkm');
+        $content = $this->http('https://lis.ly.gov.tw/lglawc/lglawkm');
         $doc = new DOMDocument;
         @$doc->loadHTML($content);
 
@@ -56,10 +56,10 @@ class Crawler
         }
 
         if (is_null($category_link)) {
-            throw new Exception("從 http://lis.ly.gov.tw/lglawc/lglawkm 找不到分類瀏覽網址");
+            throw new Exception("從 https://lis.ly.gov.tw/lglawc/lglawkm 找不到分類瀏覽網址");
         }
 
-        $content = $this->http('http://lis.ly.gov.tw' . $category_link);
+        $content = $this->http('https://lis.ly.gov.tw' . $category_link);
         $doc = new DOMDocument;
         @$doc->loadHTML($content);
 
@@ -128,7 +128,7 @@ class Crawler
             return null;
         }
 
-        $url = 'http://lis.ly.gov.tw' . $form_dom->getAttribute('action');
+        $url = 'https://lis.ly.gov.tw' . $form_dom->getAttribute('action');
 
         $content = $this->http($url, $params);
         $doc = new DOMDocument;
@@ -159,7 +159,7 @@ class Crawler
             $laws = array();
             error_log("抓取法案 {$no}/{$count} {$category} > {$category2} 分類法案");
 
-            $url = 'http://lis.ly.gov.tw' . $url;
+            $url = 'https://lis.ly.gov.tw' . $url;
             $content = $this->http($url);
             $doc = new DOMDocument;
             @$doc->loadHTML($content);
@@ -197,7 +197,7 @@ class Crawler
 
             // 再爬其他法
             foreach ($other_links as $other_type => $other_link) {
-                $url = 'http://lis.ly.gov.tw' . $other_link;
+                $url = 'https://lis.ly.gov.tw' . $other_link;
                 error_log($url);
                 $content = $this->http($url);
                 $doc = new DOMDocument;
@@ -221,7 +221,7 @@ class Crawler
     {
         error_log("抓取條文 {$category} > {$category2} > {$title} ({$status}) 資料");
 
-        $url = 'http://lis.ly.gov.tw' . $url;
+        $url = 'https://lis.ly.gov.tw' . $url;
         $content = $this->http($url);
         $doc = new DOMDocument;
         @$doc->loadHTML($content);
@@ -254,7 +254,7 @@ class Crawler
             }
 
             // 先抓全文 
-            $url = 'http://lis.ly.gov.tw' . $law_url;
+            $url = 'https://lis.ly.gov.tw' . $law_url;
             $content = $this->http($url);
             file_put_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}.html", $content);
             $this->fetchRelate($content);
@@ -273,7 +273,7 @@ class Crawler
             foreach ($law_doc->getElementsByTagName('img') as $img_dom) {
                 foreach ($btn_map as $id => $name) {
                     if ($img_dom->getAttribute('src') == "/lglaw/images/{$id}.png"){
-                        $url = 'http://lis.ly.gov.tw' . $img_dom->parentNode->getAttribute('href');
+                        $url = 'https://lis.ly.gov.tw' . $img_dom->parentNode->getAttribute('href');
                         $content = $this->http($url);
                         file_put_contents(__DIR__ . "/laws/{$law_id}/{$versions[0]}-{$name}.html", $content);
                         $this->fetchRelate($content);
@@ -377,7 +377,7 @@ class Crawler
 
     public function crawlLatestLaws()
     {
-        $url = 'http://lis.ly.gov.tw/lglawc/lglawkm';
+        $url = 'https://lis.ly.gov.tw/lglawc/lglawkm';
         $content = $this->http($url);
         $doc = new DOMDocument;
         @$doc->loadHTML($content);
@@ -401,7 +401,7 @@ class Crawler
 
                 $match_laws = array_values($match_laws);
                 if (count($match_laws) != 1) { // 如果有多筆符合，就進去找法條 ID
-                    $tmp_url = 'http://lis.ly.gov.tw' . $a_dom->getAttribute('href');
+                    $tmp_url = 'https://lis.ly.gov.tw' . $a_dom->getAttribute('href');
                     $content = $this->http($tmp_url);
                     $tmp_doc = new DOMDocument;
                     @$tmp_doc->loadHTML($content);
@@ -441,7 +441,7 @@ class Crawler
                     throw new Exception("relate 的網址不是 lawsingle");
                 }
                 $id = $matches[1];
-                $url = 'http://lis.ly.gov.tw' . $href;
+                $url = 'https://lis.ly.gov.tw' . $href;
                 if (file_exists(__DIR__ . "/laws/relate/{$id}.html")) {
                     continue;
                 }
