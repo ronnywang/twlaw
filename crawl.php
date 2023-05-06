@@ -15,7 +15,8 @@ class Crawler
                 curl_setopt($this->curl, CURLOPT_POSTFIELDS, $postfields);
             } else {
                 curl_setopt($this->curl, CURLOPT_POSTFIELDS, null);
-            }
+	    }
+	    curl_setopt($this->curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
             $content = curl_exec($this->curl);
             $info = curl_getinfo($this->curl);
             if ($info['http_code'] != 200) {
