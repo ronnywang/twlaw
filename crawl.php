@@ -78,7 +78,7 @@ class Crawler
         return $categories;
     }
 
-    public function getLawCategories()
+    public static function getLawCategories()
     {
         if (!file_exists('laws-category.csv')) {
             return array();
