@@ -64,20 +64,16 @@ class Crawler
         $doc = new DOMDocument;
         @$doc->loadHTML($content);
 
-        foreach ($doc->getElementsByTagName('div') as $div_dom) {
-            if ($div_dom->getAttribute('class') == 'title') {
-                $category = $div_dom->nodeValue;
-                foreach ($div_dom->previousSibling->getElementsByTagName('a') as $a_dom) {
-                    $href = $a_dom->getAttribute('href');
-                    if (strpos($href, '/lglawc/lglawkm') === false) {
-                        continue;
-                    }
-                    preg_match('#(.*)\((\d+)\)#', $a_dom->nodeValue, $matches);
-                    $title = $matches[1];
-                    $count = $matches[2];
-                    $categories[] = array($category, $title, $href, $count);
-                }
+        foreach ($doc->getElementsByTagName('font') as $font_dom) {
+            if (!preg_match('#^\((\d+)\)$#', $font_dom->nodeValue, $matches)) {
+                continue;
             }
+            $category = trim($font_dom->previousSibling->nodeValue);
+            $a_dom = $font_dom->parentNode;
+            $href = $a_dom->getAttribute('href');
+            $count = trim($matches[1]);
+
+            $categories[] = [$category, '', $href, $count];
         }
         return $categories;
     }
