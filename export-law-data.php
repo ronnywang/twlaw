@@ -12,6 +12,11 @@ class MyErrorException extends Exception{
 
 class Exporter
 {
+    public static function array_insert(&$array, $idx, $value)
+    {
+        $array = array_merge(array_slice($array, 0, $idx - 1), [$value], array_slice($array, $idx - 1));
+    }
+
     public static function file_get_contents($file)
     {
         error_log($file);
@@ -21,7 +26,7 @@ class Exporter
     public static function getCommitDate($versions)
     {
         $versions = implode(';',  $versions);
-        if (preg_match('#中華民國(.*)年(.*)月(.*)日(制定|全文修正|修正|廢止)#u', $versions, $matches)) {
+        if (preg_match('#中華民國(.*)年(.*)月(.*)日(制定|全文修正|修正|廢止|期滿廢止|停止適用)#u', $versions, $matches)) {
         } else {
             throw new MyErrorException("找不到最後時間: " . $versions);
         }
@@ -60,6 +65,8 @@ class Exporter
         while (true) {
             if (!array_key_exists($prev_idx, $prev_lines)) {
                 echo json_encode($prev_lines, JSON_UNESCAPED_UNICODE) . "\n";
+                echo json_encode($law_data, JSON_UNESCAPED_UNICODE) . "\n";
+                echo $commit_at . "\n";
                 throw new Exception('no prev_ix=' . $prev_idx);
             }
             $lawlinedata = $prev_lines[$prev_idx];
@@ -97,33 +104,7 @@ class Exporter
         echo 'prev:lawlinedata=' . json_encode($prev_lines[$prev_idx - 1], JSON_UNESCAPED_UNICODE) . "\n";
         echo self::filterStr($law_data->content) . "\n";
         echo self::filterStr($lawlinedata->{'內容'}) . "\n";
-        exit;
-        // 再檢查文字最相近而且條號相同的
-        $lawdiff = [];
-        foreach (self::$_law_cache->{$law_id}->{$prev_version} as $lawlinedata) {
-            $percentage = 0;
-            similar_text($lawlinedata->{'內容'}, $law_data->content, $percentage);
-            $lawdiff[$lawlinedata->{'法條代碼'}] = 100 - $percentage;
-        }
-        asort($lawdiff);
-
-        $first_lawline = array_keys($lawdiff)[0];
-        $lawlinedata = self::$_law_cache->{$law_id}->{$prev_version}->{$first_lawline};
-        if (array_values($lawdiff)[1] - array_values($lawdiff)[0] > 15) {
-            return [array_keys($lawdiff)[0], '修改', $lawlinedata->{'此法版本'}, $law_ver];
-        }
-        //if ($lawlinedata->{'條號'} == $law_data->rule_no) {
-        //    return [$first_lawline, '修改', $lawlinedata->{'此法版本'}, $law_ver];
-        //}
-        print_r($lawdiff);
-
-        //echo json_encode(self::$_law_cache->{$law_id}, JSON_UNESCAPED_UNICODE) . "\n";
-        echo "==\n";
-        echo "prev_version={$prev_version}\n";
-        var_dump($commit_at);
-        var_dump($action);
-        echo json_encode($law_data, JSON_UNESCAPED_UNICODE) . "\n";
-        exit;
+        throw new Exception("找不到對應的法律: " . $law_data->content);
     }
 
     public static function addData($type, $data)
@@ -154,11 +135,11 @@ class Exporter
         $str = preg_replace('#\s+#', '', $str);
         $str = preg_replace('/[。：，、；]/u', '', $str);
         // 內政部組織法
-        $str = str_replace('關於地方行政組織計畫之釐訂改進審核事項', '關於地方行政組織計劃之釐訂改進審核事項', $str);
-        $str = str_replace('關於合作社登記之審查事項', '關於合作社登記之審核事項', $str);
-        $str = str_replace('承長官之命令', '承長官之命', $str);
-        $str = str_replace('專員二十人至卅人薦派', '專員二十人至三十人薦派', $str);
-        $str = str_replace('內政部因事務上之需要', '內政部因事務上之必要', $str);
+        $str = str_replace('關於地方行政組織計畫之釐訂改進審核事項', '關於地方行政組織計劃之釐訂改進審核事項', $str); // XXX
+        $str = str_replace('關於合作社登記之審查事項', '關於合作社登記之審核事項', $str); // XXX
+        $str = str_replace('承長官之命令', '承長官之命', $str); // XXX
+        $str = str_replace('專員二十人至卅人薦派', '專員二十人至三十人薦派', $str); // XXX
+        $str = str_replace('內政部因事務上之需要', '內政部因事務上之必要', $str); // XXX
         return $str;
     }
 
@@ -196,15 +177,54 @@ class Exporter
                 $law->{'其他名稱'}[] = $title;
             }
             $law->{'現行版本號'} = $commit_at . '-三讀';
-            $lawver->{'法條列表'} = [];
             if (!$obj = json_decode(self::file_get_contents("law_cache/{$id}-{$versions[0]}.json"))) {
                 throw new Exception("{$id}-{$versions[0]} failed");
             }
             $prev_idx = 0;
+            $mother_level = '';
+
+            if (in_array($commit_at, ['19310822', '19360124']) and $id == '01423') {
+                self::array_insert($obj->law_data, 5, (object)[
+                    'note' => '',
+                    'rule_no' => '第五條',
+                    'content' => '對於外國總統君主應服之服裝，與對於國民政府主席同。',
+                    'relates' => [],
+                ]); // XXX
+            }
+
+            $output_idx = 0;
             for ($law_idx = 0; $law_idx < count($obj->law_data); $law_idx ++) {
                 $law_data = clone $obj->law_data[$law_idx];
+                if (property_exists($law_data, 'section_name')) {
+                    $mother_level = $law_data->section_name;
+                    continue;
+                }
+
                 if (property_exists($law_data, 'content')) {
                     $law_data->content = trim(str_replace('　', '  ', $law_data->content));
+                    $law_data->content = str_replace('﹙刪除﹚', '（刪除）', $law_data->content);
+                    $law_data->content = preg_replace('#\[附表[^]]+\]$#', '', $law_data->content);
+                    if ($commit_at == '19310214' and $id == '01013' and $law_data->content == '外交部政務次表、常任次長，輔助部長處理部務。') {
+                        continue; // XXX: 外交部組織法 25-02-14
+                    }
+                    if ($commit_at == '19361002' and $id == '01017' and $law_data->content == '教育部設科長十四人至十六人，科員八十人至一百零六人，承長官之命，分掌各科事務。') {
+                        continue; // 教育部組織法 中華民國25年10月02日
+                    }
+                    if ($commit_at == '19421219' and $id == '01017' and $law_data->content == '教育部設督學八人至十六人，視察員十六人至二十四人，視察及指導全國教育事宜。') {
+                        continue; // 教育部組織法 中華民國29年10月31日
+                    }
+                    if (in_array($commit_at, ['19310822', '19360124']) and $id == '01423' and $law_data->content == '准尉以上各員服大禮服、禮服時，應用黑漆皮靴，服公服或常服時，得用黑皮靴，當雨雪時，得用黑皮長靴。') {
+                        continue; // 海軍服裝條例 中華民國20年08月22日
+                    }
+                    if (in_array($commit_at, ['19540803', '19551230']) and $id == '01508' and strpos($law_data->content, '百分之二十由省統籌分配，在直轄市應')) {
+                        continue; // 財政收支劃分法 中華民國43年08月03日
+                    }
+                    if (in_array($commit_at, ['19540803', '19551230']) and $id == '01508' and strpos($law_data->content, '百分之十由省統籌分配')) {
+                        continue; // 財政收支劃分法 中華民國43年08月03日
+                    }
+                    if (in_array($commit_at, ['19540803', '19551230']) and $id == '01508' and strpos($law_data->content, '謂適應地方自治事業之需要經議會立法課征之稅但不得以已征貨物稅或特產稅之貨物為課征對')) {
+                        continue; // 財政收支劃分法 中華民國43年08月03日
+                    }
                 }
                 if (property_exists($obj, 'diff_table')) {
                     if (property_exists($obj->diff_table, $law_data->rule_no)) {
@@ -214,13 +234,27 @@ class Exporter
                         $law_data->diff_reason  = $obj->diff_table->{$law_data->rule_no . ':理由'};
                     }
                 }
+                if ($commit_at == '19310627' and $id == '01017' and $law_data->rule_no == '第二十四條') {
+                    $prev_idx --;
+                    $law_data->diff_act = '(增訂)'; // XXX
+                } elseif ($commit_at == '19750509' and $id == '01132' and $law_data->rule_no == '第六十條') {
+                    $law_data->diff_act = '(修正)';
+                    $law_data->diff_reason = '「社會部」修正為「內政部」並更改條次。'; // XXX
+                } elseif ($commit_at == '19370702' and $id == '01432' and in_array($law_data->rule_no, [
+                    '第一百十二條', '第一百十三條', '第一百十四條',
+                ])) {
+                    $prev_idx --;
+                    $law_data->diff_act = '(增訂)'; // XXX
+                }
+
                 $lawline = new StdClass;
                 $lawline->{'法律代碼'} = $id;
                 $lawline->{'法律版本代碼'} = $commit_at . '-三讀';
                 list($lawline_id, $law_action, $prev_ver, $current_ver, $prev_idx, $note) = self::searchLawID($law_data, $id, $commit_at, $action, $law->{'現行版本號'}, $prev_idx);
                 $lawline->{'法條代碼'} = $lawline_id;
+                $lawline->{'順序'} = $output_idx ++;
                 $lawline->{'條號'} = $law_data->rule_no;
-                $lawline->{'母層級'} = '';
+                $lawline->{'母層級'} = $mother_level;
                 $lawline->{'動作'} = $law_action;
                 $lawline->{'內容'} = '';
                 $lawline->{'前法版本'} = $prev_ver;
@@ -239,7 +273,7 @@ class Exporter
                     $lawline->{'內容'} = $law_data->content;
                 } else {
                     print_r($law_data);
-                    exit;
+                    throw new Exception('不明狀況');
                 }
                 self::addData('lawline', $lawline);
             }
@@ -754,21 +788,33 @@ class Exporter
                 }
             }
 
-            list($commit_at, $action) = self::getCommitDate($obj->versions);
+            try {
+                list($commit_at, $action) = self::getCommitDate($obj->versions);
+            } catch (Exception $e) {
+                self::addData('error', ['id' => $id, 'title' => $title, 'message' => $e->getMessage()]);
+            }
 
             if (!json_encode($obj)) {
                 throw new Exception("{$title} " .date('c', $commit_at));
             }
             file_put_contents("law_cache/{$id}-{$versions[0]}.json", json_encode($obj));
             if (count($commits) and $id != $commits[0][1]) {
-                self::handleCommits($commits, $laws);
+                try {
+                    self::handleCommits($commits, $laws);
+                } catch (Exception $e) {
+                    self::addData('error', ['id' => $id, 'title' => $title, 'message' => $e->getMessage()]);
+                }
                 $commits = [];
             }
             $commits[] = array($commit_at, $id, $title, $versions, $action);
         }
         fclose($fp);
 
-        self::handleCommits($commits, $laws);
+        try {
+            self::handleCommits($commits, $laws);
+        } catch (Exception $e) {
+            self::addData('error', ['id' => $id, 'title' => $title, 'message' => $e->getMessage()]);
+        }
     }
 }
 
